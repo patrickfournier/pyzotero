@@ -25,8 +25,8 @@ along with Pyzotero. If not, see <http://www.gnu.org/licenses/>.
 
 from __future__ import unicode_literals
 
-__author__ = 'urschrei@gmail.com'
-__version__ = '1.0.0'
+__author__ = u'Stephan Hügel'
+__version__ = '1.0.1'
 __api_version__ = '3'
 
 # Python 3 compatibility faffing
@@ -39,7 +39,6 @@ except ImportError:
     from urllib.parse import urlparse
     from urllib.parse import quote
 
-import xml.etree.ElementTree as et
 import requests
 import socket
 import feedparser
@@ -88,11 +87,6 @@ def token():
     """
     return str(uuid.uuid4().hex)
 
-
-def etags(incoming):
-    """ Return a list of etags parsed out of the XML response
-    """
-    pass
 
 
 # Override feedparser's buggy isBase64 method until they fix it
@@ -178,14 +172,13 @@ class Zotero(object):
             self.api_key = api_key
         self.preserve_json_order = preserve_json_order
         self.url_params = None
-        self.etags = None
         self.tag_data = False
         self.request = None
         # these aren't valid item fields, so never send them to the server
         self.temp_keys = set(['key', 'etag', 'group_id', 'updated'])
         # determine which processor to use for the parsed content
-        self.fmt = re.compile('(?<=format=)\w+')
-        self.content = re.compile('(?<=content=)\w+')
+        self.fmt = re.compile(r'(?<=format=)\w+')
+        self.content = re.compile(r'(?<=content=)\w+')
         self.processors = {
             'bib': self._bib_processor,
             'citation': self._citation_processor,
@@ -291,15 +284,16 @@ class Zotero(object):
                 t=self.library_type,
                 **payload)
             headers = {
-                'If-Modified-Since': payload['updated'].strftime("%a, %d %b %Y %H:%M:%S %Z")}
+                'If-Modified-Since':
+                    payload['updated'].strftime("%a, %d %b %Y %H:%M:%S %Z")}
             headers.update(self.default_headers())
             # perform the request, and check whether the response returns 304
-            r = requests.get(query, headers=headers)
+            req = requests.get(query, headers=headers)
             try:
-                r.raise_for_status()
+                req.raise_for_status()
             except requests.exceptions.HTTPError:
-                error_handler(r)
-            return r.status_code == 304
+                error_handler(req)
+            return req.status_code == 304
         # Still plenty of life left in't
         return False
 
@@ -669,8 +663,8 @@ class Zotero(object):
             """
             mtypes = mimetypes.guess_type(attachment)
             digest = hashlib.md5()
-            with open(attachment, 'rb') as f:
-                for chunk in iter(lambda: f.read(8192), b''):
+            with open(attachment, 'rb') as att:
+                for chunk in iter(lambda: att.read(8192), b''):
                     digest.update(chunk)
             auth_headers = {
                 'Content-Type': 'application/x-www-form-urlencoded',
@@ -775,13 +769,13 @@ class Zotero(object):
         """
         # Make sure there's a tags field, or add one
         try:
-            assert(item['data']['tags'])
+            assert item['data']['tags']
         except AssertionError:
             item['data']['tags'] = list()
         for tag in tags:
             item['data']['tags'].append({u'tag': u'%s' % tag})
         # make sure everything's OK
-        assert(self.check_items([item]))
+        assert self.check_items([item])
         return self.update_item(item)
 
     def check_items(self, items):
@@ -974,9 +968,8 @@ class Zotero(object):
         """
         modified = payload['version']
         key = payload['key']
-        headers = dict({
-            'If-Unmodified-Since-Version': modified}.items()
-            + self.default_headers().items())
+        headers = {'If-Unmodified-Since-Version': modified}
+        headers.update(default_headers())
         req = requests.put(
             url=self.endpoint
             + '/{t}/{u}/collections/{c}'.format(
@@ -997,7 +990,7 @@ class Zotero(object):
         An optional Item ID, which will create child attachments
         """
         orig = self._attachment_template('imported_file')
-        to_add = [orig.copy() for f in files]
+        to_add = [orig.copy() for fls in files]
         for idx, tmplt in enumerate(to_add):
             tmplt['title'] = os.path.basename(files[idx])
             tmplt['filename'] = files[idx]
@@ -1031,7 +1024,8 @@ class Zotero(object):
         to_send = self.check_items([payload])[0]
         modified = payload['version']
         ident = payload['key']
-        headers = self.default_headers()
+        headers = {'If-Unmodified-Since-Version': modified}
+        headers.update(self.default_headers())
         req = requests.put(
             url=self.endpoint
             + '/{t}/{u}/items/{id}'.format(
@@ -1056,9 +1050,8 @@ class Zotero(object):
         modified = payload['version']
         # add the collection data from the item
         modified_collections = payload['data']['collections'] + list(collection)
-        headers = dict({
-            'If-Unmodified-Since-Version': modified}.items()
-            + self.default_headers().items())
+        headers = {'If-Unmodified-Since-Version': modified}
+        headers.update(self.default_headers())
         req = requests.patch(
             url=self.endpoint
             + '/{t}/{u}/items/{i}'.format(
@@ -1082,10 +1075,10 @@ class Zotero(object):
         ident = payload['key']
         modified = payload['version']
         # strip the collection data from the item
-        modified_collections = [c for c in payload['data']['collections'] if c != collection]
-        headers = dict({
-            'If-Unmodified-Since-Version': modified}.items()
-            + self.default_headers().items())
+        modified_collections = [
+            c for c in payload['data']['collections'] if c != collection]
+        headers = {'If-Unmodified-Since-Version': modified}
+        headers.update(self.default_headers())
         req = requests.patch(
             url=self.endpoint
             + '/{t}/{u}/items/{i}'.format(
@@ -1123,9 +1116,8 @@ class Zotero(object):
                 t=self.library_type,
                 u=self.library_id,
                 c=ident)
-        headers = dict({
-            'If-Unmodified-Since-Version': modified}.items()
-            + self.default_headers().items())
+        headers = {'If-Unmodified-Since-Version': modified}
+        headers.update(self.default_headers())
         req = requests.delete(
             url=url,
             params=params,
@@ -1160,9 +1152,8 @@ class Zotero(object):
                 t=self.library_type,
                 u=self.library_id,
                 c=ident)
-        headers = dict({
-            'If-Unmodified-Since-Version': modified}.items()
-            + self.default_headers().items())
+        headers = {'If-Unmodified-Since-Version': modified}
+        headers.update(self.default_headers())
         req = requests.delete(
             url=url,
             params=params,
@@ -1175,17 +1166,19 @@ class Zotero(object):
         return True
 
 
-class Backoff():
+class Backoff(object):
     """ a simple backoff timer for HTTP 429 responses """
     def __init__(self, delay=1):
         self.wait = delay
 
     @property
     def delay(self):
+        """ return increasing delays """
         self.wait = self.wait * 2
         return self.wait
 
     def reset(self):
+        """ reset delay """
         self.wait = 1
 
 
@@ -1228,8 +1221,8 @@ def error_handler(req):
                 raise ze.TooManyRetries("Continuing to receive HTTP 429 \
 responses after 62 seconds. You are being rate-limited, try again later")
             time.sleep(delay)
-            s = requests.Session()
-            new_req = s.send(req.request)
+            sess = requests.Session()
+            new_req = sess.send(req.request)
             try:
                 new_req.raise_for_status()
             except requests.exceptions.HTTPError:
